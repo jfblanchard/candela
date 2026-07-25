@@ -11,8 +11,10 @@ import subprocess
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QSlider, QLabel, QComboBox, QGroupBox, QPushButton, QCheckBox
+    QSlider, QLabel, QComboBox, QGroupBox, QPushButton, QCheckBox,
+    QSystemTrayIcon, QMenu
 )
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer
 
 
@@ -133,8 +135,11 @@ class MonitorControl(QWidget):
         self.apply_timer.setSingleShot(True)
         self.apply_timer.timeout.connect(self.apply_settings)
 
+        self._quitting = False
+
         self.init_ui()
         self.restore_config()
+        self.setup_tray()
 
         if not self.has_redshift:
             self.temp_group.setTitle("Color Temperature  ⚠ (install redshift)")
@@ -297,12 +302,64 @@ class MonitorControl(QWidget):
         self.brightness_slider.blockSignals(False)
         self.temp_slider.blockSignals(False)
 
+    def setup_tray(self):
+        icon = QIcon.fromTheme("display-brightness",
+                               QIcon.fromTheme("video-display"))
+        self.tray = QSystemTrayIcon(icon, self)
+        self.tray.setToolTip("Candela")
+
+        menu = QMenu()
+        show_action = menu.addAction("Show Candela")
+        show_action.triggered.connect(self.show_window)
+        menu.addSeparator()
+        quit_action = menu.addAction("Quit")
+        quit_action.triggered.connect(self.quit_app)
+
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self.on_tray_activated)
+        self.tray.show()
+
+    def show_window(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show_window()
+
+    def quit_app(self):
+        self._quitting = True
+        if not self.keep_checkbox.isChecked():
+            if self.has_redshift:
+                subprocess.run(
+                    ["redshift", "-O", "6500", "-b", "1.00", "-P"],
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                monitor = self.monitor_combo.currentText()
+                subprocess.run(
+                    ["xrandr", "--output", monitor, "--brightness", "1.0"],
+                    stderr=subprocess.DEVNULL,
+                )
+            save_config(100, 6500, self.keep_checkbox.isChecked())
+        self.tray.hide()
+        QApplication.instance().quit()
+
     def reset_defaults(self):
         self.brightness_slider.setValue(100)
         self.temp_slider.setValue(6500)
         # reset_defaults triggers apply_settings via the slider signals
 
     def closeEvent(self, event):
+        if not self._quitting and self.tray.isSystemTrayAvailable():
+            self.hide()
+            event.ignore()
+            return
+
         if not self.keep_checkbox.isChecked():
             # Bypass the debounce timer — call subprocess.run (blocking)
             # directly so the reset completes before the process exits.
@@ -317,6 +374,7 @@ class MonitorControl(QWidget):
                     ["xrandr", "--output", monitor, "--brightness", "1.0"],
                     stderr=subprocess.DEVNULL,
                 )
+            save_config(100, 6500, self.keep_checkbox.isChecked())
         event.accept()
 
 
