@@ -6,7 +6,9 @@ X11 only (not Wayland).
 """
 
 import sys
+import json
 import subprocess
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QSlider, QLabel, QComboBox, QGroupBox, QPushButton, QCheckBox
@@ -98,17 +100,41 @@ def check_redshift():
         return False
 
 
+CONFIG_PATH = Path.home() / ".config" / "candela" / "settings.json"
+DEFAULTS = {"brightness": 100, "temp_k": 6500, "keep_on_close": False}
+
+
+def load_config():
+    try:
+        return {**DEFAULTS, **json.loads(CONFIG_PATH.read_text())}
+    except Exception:
+        return dict(DEFAULTS)
+
+
+def save_config(brightness, temp_k, keep_on_close):
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(
+            {"brightness": brightness, "temp_k": temp_k, "keep_on_close": keep_on_close},
+            indent=2
+        ))
+    except Exception:
+        pass
+
+
 class MonitorControl(QWidget):
     def __init__(self):
         super().__init__()
         self.monitors = get_monitors()
         self.has_redshift = check_redshift()
+        self.config = load_config()
 
         self.apply_timer = QTimer()
         self.apply_timer.setSingleShot(True)
         self.apply_timer.timeout.connect(self.apply_settings)
 
         self.init_ui()
+        self.restore_config()
 
         if not self.has_redshift:
             self.temp_group.setTitle("Color Temperature  ⚠ (install redshift)")
@@ -243,6 +269,8 @@ class MonitorControl(QWidget):
         brightness = self.brightness_slider.value() / 100.0
         temp_k = round(self.temp_slider.value() / 100) * 100
 
+        save_config(self.brightness_slider.value(), temp_k, self.keep_checkbox.isChecked())
+
         if self.has_redshift:
             # Redshift handles both — passing both in one call prevents
             # them from clobbering each other's gamma ramp changes.
@@ -257,6 +285,18 @@ class MonitorControl(QWidget):
                 stderr=subprocess.DEVNULL,
             )
 
+    def restore_config(self):
+        """Set sliders to last saved values without triggering redundant apply."""
+        self.brightness_slider.blockSignals(True)
+        self.temp_slider.blockSignals(True)
+        self.brightness_slider.setValue(self.config["brightness"])
+        self.temp_slider.setValue(self.config["temp_k"])
+        self.brightness_label.setText(f"{self.config['brightness']}%")
+        self.temp_label.setText(f"{self.config['temp_k']} K")
+        self.keep_checkbox.setChecked(self.config["keep_on_close"])
+        self.brightness_slider.blockSignals(False)
+        self.temp_slider.blockSignals(False)
+
     def reset_defaults(self):
         self.brightness_slider.setValue(100)
         self.temp_slider.setValue(6500)
@@ -264,9 +304,19 @@ class MonitorControl(QWidget):
 
     def closeEvent(self, event):
         if not self.keep_checkbox.isChecked():
-            self.reset_defaults()
-            # Let the reset commands finish before quitting
-            import time; time.sleep(0.3)
+            # Bypass the debounce timer — call subprocess.run (blocking)
+            # directly so the reset completes before the process exits.
+            if self.has_redshift:
+                subprocess.run(
+                    ["redshift", "-O", "6500", "-b", "1.00", "-P"],
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                monitor = self.monitor_combo.currentText()
+                subprocess.run(
+                    ["xrandr", "--output", monitor, "--brightness", "1.0"],
+                    stderr=subprocess.DEVNULL,
+                )
         event.accept()
 
 

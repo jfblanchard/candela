@@ -30,3 +30,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev tools
+capture_screenshot.py
