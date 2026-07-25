@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Monitor Control - Simple brightness and color temperature adjustment.
+Candela - Manual brightness and color temperature control for Linux.
 Requires: PyQt6, xrandr (xorg-xrandr), redshift
 X11 only (not Wayland).
 """
@@ -9,7 +9,7 @@ import sys
 import subprocess
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QSlider, QLabel, QComboBox, QGroupBox, QPushButton
+    QSlider, QLabel, QComboBox, QGroupBox, QPushButton, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer
 
@@ -68,6 +68,9 @@ QPushButton {
 QPushButton:hover { background: #45475a; }
 QLabel#hint { color: #585b70; font-size: 11px; }
 QLabel#value { color: #a6e3a1; font-weight: bold; min-width: 62px; }
+QCheckBox { color: #6c7086; font-size: 11px; }
+QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #585b70; border-radius: 3px; background: #313244; }
+QCheckBox::indicator:checked { background: #89b4fa; border-color: #89b4fa; }
 """
 
 
@@ -199,13 +202,23 @@ class MonitorControl(QWidget):
 
         root.addWidget(self.temp_group)
 
-        # --- Reset button ---
-        reset_row = QHBoxLayout()
-        reset_row.addStretch()
+        # --- Bottom row: keep-on-close checkbox + reset button ---
+        bottom_row = QHBoxLayout()
+
+        self.keep_checkbox = QCheckBox("Keep settings on close")
+        self.keep_checkbox.setChecked(False)
+        self.keep_checkbox.setToolTip(
+            "When unchecked, closing the window resets brightness and color temperature to defaults."
+        )
+        bottom_row.addWidget(self.keep_checkbox)
+
+        bottom_row.addStretch()
+
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(self.reset_defaults)
-        reset_row.addWidget(reset_btn)
-        root.addLayout(reset_row)
+        bottom_row.addWidget(reset_btn)
+
+        root.addLayout(bottom_row)
 
     # ------------------------------------------------------------------
     # Slider callbacks
@@ -250,8 +263,10 @@ class MonitorControl(QWidget):
         # reset_defaults triggers apply_settings via the slider signals
 
     def closeEvent(self, event):
-        # Settings are intentionally kept after close — they persist in the
-        # X session until logout/reboot or until you open the app and reset.
+        if not self.keep_checkbox.isChecked():
+            self.reset_defaults()
+            # Let the reset commands finish before quitting
+            import time; time.sleep(0.3)
         event.accept()
 
 

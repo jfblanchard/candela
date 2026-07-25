@@ -1,55 +1,72 @@
 # Candela
 
-Simple brightness and color temperature control for Linux. Named after the SI unit of luminous intensity.
+> Manual brightness and color temperature control for Linux — named after the SI unit of luminous intensity.
+
+A clean, dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling, no daemons — just instant manual control when you want it.
+
+![screenshot placeholder](screenshot.png)
+
+## Why Candela?
+
+Most Linux tools in this space are either time-based and automatic (Redshift, Gammastep), command-line only (`xrandr`, `sct`), or have dated UIs that expose raw R/G/B gamma channels instead of a human-friendly Kelvin temperature slider. Candela aims to be the tool you reach for when you just want to quickly dim your screen and warm the color for late-night use.
+
+## Features
+
+- **Brightness slider** — 10% to 100%
+- **Color temperature slider** — 2000K (warm candlelight) to 6500K (daylight)
+- **Multi-monitor support** — dropdown auto-populated from connected outputs
+- **Instant apply** — changes take effect as you move the slider
+- **Settings persist** after closing, within your X session (until logout/reboot)
+- **Reset to Defaults** button restores 6500K / 100% brightness
+- Dark UI — easy on the eyes when you need it most
 
 ## Requirements
 
-**Mamba environment (already created):**
-```bash
-mamba activate monitor-control
-```
+**Python:** 3.10+
 
-To recreate from scratch:
+**Python packages:**
 ```bash
-mamba create -n monitor-control python=3.11 -y
-mamba activate monitor-control
-pip install PyQt6 pyinstaller
+pip install PyQt6
 ```
 
 **System packages:**
-```
-sudo apt install redshift        # Debian/Ubuntu
+```bash
+sudo apt install redshift        # Debian / Ubuntu / Mint
 sudo dnf install redshift        # Fedora
+sudo pacman -S redshift          # Arch / Manjaro
 ```
-`redshift` is needed for color temperature. Brightness works without it.
+`redshift` handles color temperature. Brightness works without it (software gamma via `xrandr`).
 
-**Note:** X11 only — does not work on Wayland.
+> **Note:** X11 only. Wayland is not currently supported.
 
-## Run
+## Install
 
 ```bash
-mamba activate monitor-control
-python monitor_control.py
+git clone https://github.com/jfblanchard/candela.git
+cd candela
+pip install PyQt6
+python candela.py
 ```
 
-## Build standalone binary (PyInstaller)
-
-```bash
-mamba activate monitor-control
-pyinstaller --onefile --windowed --name candela monitor_control.py
-# Output: dist/candela  (single executable, no Python needed to run)
-```
-
-## Install via pip (coming soon)
+## Install via pip *(coming soon)*
 
 ```bash
 pip install candela-ctrl
 candela
 ```
 
-## Notes
+## Build a standalone binary
 
-- Settings **persist after closing** within the X session (until logout/reboot).
-- Use the **Reset to Defaults** button to restore 6500K / 100% brightness before closing.
-- Color temperature and brightness are applied together via `redshift -O TEMP -b BRIGHTNESS -P`.
-- X11 only — does not work on Wayland sessions.
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name candela candela.py
+# Produces: dist/candela  — single executable, no Python required
+```
+
+## Contributing
+
+Issues and PRs welcome. If your monitor supports DDC/CI, hardware brightness control (via `ddcutil`) is the next planned feature — real backlight reduction instead of software gamma.
+
+## License
+
+MIT
