@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "candela-ctrl"
+version = "0.1.2"
+description = "Manual brightness and color temperature control for Linux"
+readme = "README.md"
+license = "MIT"
+authors = [{name = "Jon Blanchard"}]
+requires-python = ">=3.10"
+dependencies = ["PyQt6"]
+keywords = ["brightness", "monitor", "color-temperature", "linux", "night-mode", "redshift", "display"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/jfblanchard/candela"
+Repository = "https://github.com/jfblanchard/candela"
+
+[project.scripts]
+candela = "candela:main"
+
+[tool.setuptools]
+py-modules = ["candela"]

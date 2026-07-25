@@ -18,6 +18,7 @@ dist/
 *.egg-info/
 *.egg
 .eggs/
+candela_ctrl.egg-info/
 
 # Distribution
 *.whl

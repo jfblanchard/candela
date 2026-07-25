@@ -4,7 +4,7 @@
 
 A clean, dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling, no daemons — just instant manual control when you want it.
 
-![screenshot placeholder](screenshot.png)
+![Candela screenshot](https://raw.githubusercontent.com/jfblanchard/candela/master/screenshot.png)
 
 ## Why Candela?
 
@@ -48,7 +48,7 @@ pip install PyQt6
 python candela.py
 ```
 
-## Install via pip *(coming soon)*
+## Install via pip
 
 ```bash
 pip install candela-ctrl
