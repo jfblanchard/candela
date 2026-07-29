@@ -301,6 +301,7 @@ class MonitorControl(QWidget):
         self.keep_checkbox.setChecked(self.config["keep_on_close"])
         self.brightness_slider.blockSignals(False)
         self.temp_slider.blockSignals(False)
+        self.apply_settings()
 
     def setup_tray(self):
         icon = QIcon.fromTheme("display-brightness",
