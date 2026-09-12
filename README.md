@@ -2,7 +2,7 @@
 
 > Manual brightness and color temperature control for Linux — named after the SI unit of luminous intensity.
 
-A clean, dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling, no daemons — just instant manual control when you want it.
+A clean, dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling — just instant manual control when you want it.
 
 ![Candela screenshot](https://raw.githubusercontent.com/jfblanchard/candela/master/screenshot.png)
 
@@ -36,6 +36,8 @@ sudo dnf install redshift        # Fedora
 sudo pacman -S redshift          # Arch / Manjaro
 ```
 `redshift` handles color temperature. Brightness works without it (software gamma via `xrandr`).
+
+When redshift is available, Candela keeps a long-lived `redshift` process running in the background (instead of a one-shot call) so your brightness/temp setting survives DPMS sleep, screen lock, and other events that reset the display's gamma ramp. That process is replaced whenever you change a slider and is stopped when Candela quits.
 
 > **Note:** X11 only. Wayland is not currently supported.
 

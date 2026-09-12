@@ -102,6 +102,12 @@ def check_redshift():
         return False
 
 
+# Fixed reference location used only to keep redshift's day/night solar
+# calculation from mattering: day and night temp/brightness are always set
+# to the same value, so the "location" itself never affects the output.
+REDSHIFT_MANUAL_LOCATION = "0:0"
+
+
 CONFIG_PATH = Path.home() / ".config" / "candela" / "settings.json"
 DEFAULTS = {"brightness": 100, "temp_k": 6500, "keep_on_close": False}
 
@@ -136,6 +142,7 @@ class MonitorControl(QWidget):
         self.apply_timer.timeout.connect(self.apply_settings)
 
         self._quitting = False
+        self.redshift_proc = None
 
         self.init_ui()
         self.restore_config()
@@ -277,18 +284,46 @@ class MonitorControl(QWidget):
         save_config(self.brightness_slider.value(), temp_k, self.keep_checkbox.isChecked())
 
         if self.has_redshift:
-            # Redshift handles both — passing both in one call prevents
-            # them from clobbering each other's gamma ramp changes.
-            subprocess.Popen(
-                ["redshift", "-O", str(temp_k), "-b", f"{brightness:.2f}", "-P"],
-                stderr=subprocess.DEVNULL,
-            )
+            self.start_redshift_daemon(temp_k, brightness)
         else:
             # Fallback: xrandr brightness only, no color temp
             subprocess.Popen(
                 ["xrandr", "--output", monitor, "--brightness", f"{brightness:.2f}"],
                 stderr=subprocess.DEVNULL,
             )
+
+    def start_redshift_daemon(self, temp_k, brightness):
+        """Replace any running redshift daemon with one holding the given
+        temp/brightness. Using -l manual with identical day/night values
+        keeps redshift running continuously (instead of exiting after a
+        one-shot -O apply), so it re-asserts the gamma ramp on its own
+        after DPMS sleep/wake, screen lock, or other events that reset it."""
+        self.stop_redshift_daemon()
+        self.redshift_proc = subprocess.Popen(
+            [
+                "redshift",
+                "-l", REDSHIFT_MANUAL_LOCATION,
+                "-t", f"{temp_k}:{temp_k}",
+                "-b", f"{brightness:.2f}:{brightness:.2f}",
+                "-m", "randr",
+                "-P",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def stop_redshift_daemon(self):
+        """Kill the tracked redshift daemon, if any. Uses SIGKILL rather than
+        a graceful SIGTERM: redshift can take several seconds to react to
+        SIGTERM (it appears to only check for signals once it reaches its
+        main loop), which would block the UI on every slider change. A hard
+        kill is safe here because whatever replaces it (a new daemon or an
+        explicit one-shot reset) always passes -P to reset the gamma ramp
+        before applying its own values."""
+        if self.redshift_proc is not None and self.redshift_proc.poll() is None:
+            self.redshift_proc.kill()
+            self.redshift_proc.wait()
+        self.redshift_proc = None
 
     def restore_config(self):
         """Set sliders to last saved values without triggering redundant apply."""
@@ -334,6 +369,7 @@ class MonitorControl(QWidget):
 
     def quit_app(self):
         self._quitting = True
+        self.stop_redshift_daemon()
         if not self.keep_checkbox.isChecked():
             if self.has_redshift:
                 subprocess.run(
@@ -361,6 +397,7 @@ class MonitorControl(QWidget):
             event.ignore()
             return
 
+        self.stop_redshift_daemon()
         if not self.keep_checkbox.isChecked():
             # Bypass the debounce timer — call subprocess.run (blocking)
             # directly so the reset completes before the process exits.
