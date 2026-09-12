@@ -41,6 +41,15 @@ When redshift is available, Candela keeps a long-lived `redshift` process runnin
 
 > **Note:** X11 only. Wayland is not currently supported.
 
+> **Known conflict:** Do not run Candela at the same time as another tool that adjusts
+> brightness/color temperature — KDE Plasma's **Night Color**, `redshift-gtk` (or any
+> redshift-based autostart), `clight`, etc. They all write to the **same display gamma
+> ramp**, so they fight: whichever one fires last clobbers the others, and your manual
+> setting can silently lose to the other tool's automatic day/night schedule. Pick **one**
+> gamma tool and turn the others off (e.g. System Settings → Night Color → off). If you
+> prefer *automatic* day/night warmth, use KDE Night Color (or redshift-gtk) instead of
+> Candela — it's built for that; Candela is for manual, fixed control.
+
 ## Install
 
 ```bash
