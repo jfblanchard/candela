@@ -1,14 +1,14 @@
 # Candela
 
-> Manual brightness and color temperature control for Linux — named after the SI unit of luminous intensity.
+> Manual brightness and color temperature control for Linux, named after the SI unit of luminous intensity.
 
-A clean, dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling — just instant manual control when you want it.
+A small dark-themed desktop utility for tuning your monitor at night (or any time). Two sliders: one for brightness, one for color temperature in Kelvin. No automatic scheduling, just instant manual control when you want it.
 
 ![Candela screenshot](https://raw.githubusercontent.com/jfblanchard/candela/master/screenshot.png)
 
 ## Why Candela?
 
-Most Linux tools in this space are either time-based and automatic (Redshift, Gammastep), command-line only (`xrandr`, `sct`), or have dated UIs that expose raw R/G/B gamma channels instead of a human-friendly Kelvin temperature slider. Candela aims to be the tool you reach for when you just want to quickly dim your screen and warm the color for late-night use.
+Most Linux tools in this space are either time-based and automatic (Redshift, Gammastep), command-line only (`xrandr`, `sct`), or have dated UIs that expose raw R/G/B gamma channels instead of a human-friendly Kelvin temperature slider. Candela aims to be the tool for when you just want to quickly dim your screen and warm the color for late-night use.
 
 ## Features
 
@@ -59,7 +59,7 @@ When redshift is available, Candela applies settings with instant one-shot write
 > qdbus org.kde.KWin /KWin reconfigure
 > ```
 > If you prefer *automatic* day/night warmth, use KDE Night Color (or redshift-gtk)
-> instead of Candela — it's built for that; Candela is for manual, fixed control.
+> instead of Candela since it's built for that; Candela is for manual, fixed control.
 >
 > **Escape hatch:** if the screen ever ends up too dim to see, right-click the
 > Candela tray icon → **Reset Display** to snap back to neutral without opening
@@ -91,7 +91,7 @@ pyinstaller --onefile --windowed --name candela candela.py
 
 ## Contributing
 
-Issues and PRs welcome. If your monitor supports DDC/CI, hardware brightness control (via `ddcutil`) is the next planned feature — real backlight reduction instead of software gamma.
+Issues and PRs welcome. If your monitor supports DDC/CI, hardware brightness control (via `ddcutil`) is the next planned feature, which is real backlight reduction instead of software gamma.
 
 ## License
 
