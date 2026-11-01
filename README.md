@@ -37,7 +37,7 @@ sudo pacman -S redshift          # Arch / Manjaro
 ```
 `redshift` handles color temperature. Brightness works without it (software gamma via `xrandr`).
 
-When redshift is available, Candela keeps a long-lived `redshift` process running in the background (instead of a one-shot call) so your brightness/temp setting survives DPMS sleep, screen lock, and other events that reset the display's gamma ramp. That process is replaced whenever you change a slider and is stopped when Candela quits.
+When redshift is available, Candela applies settings with instant one-shot writes and re-asserts them every few seconds, so your brightness/temp setting survives DPMS sleep, screen lock, and other events that reset the display's gamma ramp. (A long-lived `redshift` daemon is deliberately not used: on some drivers it can misread back its own ramp and lock the display into corrupt output.)
 
 > **Note:** X11 only. Wayland is not currently supported.
 

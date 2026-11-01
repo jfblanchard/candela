@@ -3,6 +3,35 @@
 All notable changes to Candela are documented here. Commit messages stay
 one line; the details live in this file.
 
+## [0.1.6] — 2026-11-01
+
+### Fixed — display stuck warm/dim despite slider changes (the real root cause)
+
+The persistent redshift daemon introduced in 0.1.4 was itself corrupting
+the gamma ramp on some drivers (observed on NVIDIA + randr): its
+periodic read-back misinterprets its own LUT and writes the misfit
+values back, locking the display into self-reinforcing warm/dim output.
+Verified live: a daemon launched with `-t 6500:6500 -b 1:1` kept
+rewriting a ramp reading gamma `-0.99:1.0:4.9` / brightness `0.25` every
+~5s; quitting the app was the only way to clear it. This also explains
+the original "screen goes near-black" report — the same loop, seeded
+with a dim ramp.
+
+- **Daemon mode removed** — applies now use one-shot `redshift -O`
+  writes, which apply exactly the computed ramp with no read-back state
+  to corrupt.
+- **`-P` on every apply** — on NVIDIA, a plain `-O` write to a
+  near-identity ramp (6500K/100%) is silently dropped, so sliding back
+  to neutral left the old warm ramp in place. `-P` resets the ramps
+  first; every apply now lands. Verified on-hardware: warm→neutral
+  round-trip restores `1.0:1.0:1.0` and holds.
+- **`-g 1.0:1.0:1.0` pinned** — a `gamma=` line in a user's
+  `redshift.conf` can no longer contaminate Candela's ramp.
+- **5s watchdog → re-assert tick** — still wipes competing gamma
+  daemons, and now also re-writes our ramp each cycle, restoring the
+  DPMS/screen-lock persistence the daemon provided without its
+  read-back state.
+
 ## [0.1.5] — 2026-11-01
 
 ### Fixed — stuck dark screen

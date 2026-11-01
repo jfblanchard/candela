@@ -106,10 +106,9 @@ def check_redshift():
 def check_kde_night_color():
     """Return True if KDE Night Color is enabled (reads ~/.config/kwinrc).
 
-    Night Color writes to the same X11 gamma ramp as Candela's redshift
-    daemon; running both causes visible warm/cold flicker around
-    sunrise/sunset when Night Color transitions between day and night
-    temperatures."""
+    Night Color writes to the same X11 gamma ramp Candela does; running
+    both causes visible warm/cold flicker around sunrise/sunset when
+    Night Color transitions between day and night temperatures."""
     try:
         text = (Path.home() / ".config" / "kwinrc").read_text()
         section = text.split("[NightColor]", 1)
@@ -130,7 +129,7 @@ def check_competing_autostart():
     gamma daemon (redshift-gtk, gammastep, clight...), or None.
 
     A competing daemon re-asserts its own gamma ramp every few seconds and
-    fights Candela's daemon — the visible symptom is the screen
+    fights Candela's — the visible symptom is the screen
     alternating/flickering between two brightness/temperature settings.
     Candela stops competitors while it runs, but autostart relaunches
     them at every login, so the user should still disable the entry."""
@@ -199,21 +198,15 @@ def kill_competing_gamma_daemons():
         _pkill(mode, name)
 
 
-def stray_gamma_daemon_pids(exclude=None):
-    """PIDs of competing gamma processes currently alive, excluding our
-    own daemon's PID. Used by the watchdog to detect tools that (re)start
-    after our last pkill — e.g. an autostarted redshift-gtk finishing its
-    boot, or a wrapper respawning its backend."""
+def stray_gamma_daemon_pids():
+    """PIDs of competing gamma processes currently alive. Used by the
+    watchdog to detect tools that (re)start after our last pkill — e.g.
+    an autostarted redshift-gtk finishing its boot, or a wrapper
+    respawning its backend."""
     pids = []
     for mode, name in COMPETING_GAMMA_TOOLS:
         pids += _pgrep(mode, name)
-    return [p for p in pids if p != exclude]
-
-
-# Fixed reference location used only to keep redshift's day/night solar
-# calculation from mattering: day and night temp/brightness are always set
-# to the same value, so the "location" itself never affects the output.
-REDSHIFT_MANUAL_LOCATION = "0:0"
+    return pids
 
 
 CONFIG_PATH = Path.home() / ".config" / "candela" / "settings.json"
@@ -266,19 +259,21 @@ class MonitorControl(QWidget):
         self.apply_timer.timeout.connect(self.apply_settings)
 
         self._quitting = False
-        self.redshift_proc = None
 
         self.init_ui()
         self.restore_config()
         self.setup_tray()
 
-        # Watchdog: competing tools can (re)appear *after* our last pkill —
-        # autostarted apps finishing their boot, redshift-gtk respawning its
-        # backend, a user launching one by hand. Re-check periodically and
-        # re-assert, so the gamma ramp can never be held hostage for long.
-        self.watchdog_timer = QTimer()
-        self.watchdog_timer.timeout.connect(self.check_for_strays)
-        self.watchdog_timer.start(5000)
+        # Re-assert tick: one-shot applies don't persist through DPMS
+        # sleep/wake, screen lock, or a competing daemon's rewrite, so
+        # every few seconds we re-write our ramp and wipe any competing
+        # gamma process that (re)appeared. This replaces the old
+        # persistent redshift daemon, which on some drivers (notably
+        # NVIDIA) enters a read-back loop and locks the display into
+        # self-reinforcing corrupt gamma.
+        self.maintain_timer = QTimer()
+        self.maintain_timer.timeout.connect(self.maintain_display)
+        self.maintain_timer.start(5000)
 
         if not self.has_redshift:
             self.temp_group.setTitle("Color Temperature  ⚠ (install redshift)")
@@ -430,64 +425,56 @@ class MonitorControl(QWidget):
     # ------------------------------------------------------------------
     # Apply
 
+    def _targets(self):
+        return (
+            round(self.temp_slider.value() / 100) * 100,
+            self.brightness_slider.value() / 100.0,
+        )
+
     def apply_settings(self):
-        monitor = self.monitor_combo.currentText()
-        brightness = self.brightness_slider.value() / 100.0
-        temp_k = round(self.temp_slider.value() / 100) * 100
+        temp_k, brightness = self._targets()
+        save_config(self.brightness_slider.value(), temp_k,
+                    self.keep_checkbox.isChecked())
+        self.write_display(temp_k, brightness)
 
-        save_config(self.brightness_slider.value(), temp_k, self.keep_checkbox.isChecked())
-
+    def write_display(self, temp_k, brightness):
         if self.has_redshift:
-            self.start_redshift_daemon(temp_k, brightness)
+            self.apply_redshift(temp_k, brightness)
         else:
             # Fallback: xrandr brightness only, no color temp
             subprocess.Popen(
-                ["xrandr", "--output", monitor, "--brightness", f"{brightness:.2f}"],
+                ["xrandr", "--output", self.monitor_combo.currentText(),
+                 "--brightness", f"{brightness:.2f}"],
                 stderr=subprocess.DEVNULL,
             )
 
-    def start_redshift_daemon(self, temp_k, brightness):
-        """Replace any running redshift daemon with one holding the given
-        temp/brightness. Using -l manual with identical day/night values
-        keeps redshift running continuously (instead of exiting after a
-        one-shot -O apply), so it re-asserts the gamma ramp on its own
-        after DPMS sleep/wake, screen lock, or other events that reset it."""
-        self.stop_redshift_daemon()
-        # Kill any orphaned redshift daemons left by a previous instance that
-        # was killed externally (e.g. SIGKILL) — they keep re-applying their
-        # gamma ramp and fight ours, causing visible brightness flicker.
-        kill_competing_gamma_daemons()
-        # -r disables redshift's ~4s ease-in fade so slider changes apply
-        # instantly; it also removes the window where a daemon killed by
-        # the next slider change leaves the ramp stuck mid-fade.
-        # No -P either: -P resets the gamma ramp to neutral before
-        # applying, which would flash the screen to full brightness on
-        # every slider change.
-        self.redshift_proc = subprocess.Popen(
+    def apply_redshift(self, temp_k, brightness):
+        """One-shot ramp write. Deliberately NOT redshift's continual
+        daemon mode: on some drivers (observed on NVIDIA + randr) the
+        daemon's periodic read-back misinterprets its own ramp and locks
+        the display into self-reinforcing corrupt gamma — the screen
+        stays warm/dim no matter what the sliders ask for. One-shot -O
+        writes apply exactly what we compute, land instantly (no fade),
+        and the maintain tick re-asserts them for persistence. -g pins
+        the gamma correction to neutral so a stray gamma= in a user's
+        redshift.conf can't contaminate our ramp.
+
+        -P is required, not optional: on NVIDIA a plain -O write to a
+        near-identity ramp (6500K/1.0) is silently dropped — sliding the
+        temp back up leaves the old warm ramp in place. -P resets the
+        ramps first, which makes every apply actually land."""
+        subprocess.Popen(
             [
                 "redshift",
-                "-l", REDSHIFT_MANUAL_LOCATION,
-                "-t", f"{temp_k}:{temp_k}",
-                "-b", f"{brightness:.2f}:{brightness:.2f}",
+                "-O", str(temp_k),
+                "-b", f"{brightness:.2f}",
+                "-g", "1.0:1.0:1.0",
+                "-P",
                 "-m", "randr",
-                "-r",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-
-    def stop_redshift_daemon(self):
-        """Kill the tracked redshift daemon, if any. Uses SIGKILL rather than
-        a graceful SIGTERM: redshift can take several seconds to react to
-        SIGTERM (it appears to only check for signals once it reaches its
-        main loop), which would block the UI on every slider change. A hard
-        kill is safe here because the gamma ramp persists after the daemon
-        dies, so whatever replaces it (a new daemon or an explicit one-shot
-        reset) takes over from a valid ramp rather than a blank screen."""
-        if self.redshift_proc is not None and self.redshift_proc.poll() is None:
-            self.redshift_proc.kill()
-            self.redshift_proc.wait()
-        self.redshift_proc = None
 
     def restore_config(self):
         """Set sliders to last saved values without triggering redundant apply."""
@@ -535,22 +522,14 @@ class MonitorControl(QWidget):
         self.temp_slider.setValue(TEMP_MAX)
         self.apply_settings()
 
-    def check_for_strays(self):
-        """Watchdog tick. If a competing daemon (re)appeared since the last
-        pkill, wipe everything and respawn ours. pkill can't exclude our
-        own redshift by name, so ours dies too and is immediately replaced
-        — harmless now that applies are instant (-r)."""
-        own_alive = (self.redshift_proc is not None
-                     and self.redshift_proc.poll() is None)
-        own = self.redshift_proc.pid if own_alive else None
-        if not stray_gamma_daemon_pids(exclude=own):
-            return
-        if self.has_redshift:
-            self.start_redshift_daemon(
-                round(self.temp_slider.value() / 100) * 100,
-                self.brightness_slider.value() / 100.0)
-        else:
+    def maintain_display(self):
+        """Periodic re-assert. Wipe any competing daemon that (re)appeared
+        since the last pkill, then re-write our ramp — covers DPMS
+        sleep/wake, screen lock, and xrandr resets that drop the LUT."""
+        if stray_gamma_daemon_pids():
             kill_competing_gamma_daemons()
+        temp_k, brightness = self._targets()
+        self.write_display(temp_k, brightness)
 
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -561,7 +540,6 @@ class MonitorControl(QWidget):
 
     def quit_app(self):
         self._quitting = True
-        self.stop_redshift_daemon()
         # Kill strays BEFORE resetting: a surviving daemon would re-assert
         # its old ramp right after our reset, leaving the screen at its
         # stale setting instead of defaults.
@@ -593,7 +571,6 @@ class MonitorControl(QWidget):
             event.ignore()
             return
 
-        self.stop_redshift_daemon()
         # Kill strays before resetting, same as quit_app — otherwise a
         # stray daemon resurrects its stale ramp after our reset.
         kill_competing_gamma_daemons()
@@ -618,10 +595,9 @@ class MonitorControl(QWidget):
 def main():
     app = QApplication(sys.argv)
 
-    # Single instance: a second Candela would spawn a second redshift
-    # daemon, and the two daemons re-assert their own ramps every few
-    # seconds — a permanent visible fight until reboot. QLockFile records
-    # the holder's PID and auto-recovers locks left by killed processes.
+    # Single instance: two Candelas would fight over the same gamma
+    # ramp. QLockFile records the holder's PID and auto-recovers locks
+    # left by killed processes.
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(CONFIG_PATH.with_name("instance.lock")))
     if not lock.tryLock(100):
