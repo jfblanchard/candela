@@ -1,6 +1,6 @@
 # Maintainer: Jon Blanchard <https://github.com/jfblanchard>
 pkgname=candela
-pkgver=0.1.4
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Manual brightness and color temperature control for Linux"
 arch=('any')
@@ -9,7 +9,7 @@ license=('MIT')
 depends=('python' 'python-pyqt6' 'redshift' 'xorg-xrandr' 'procps-ng')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 source=("https://files.pythonhosted.org/packages/source/c/candela-ctrl/candela_ctrl-${pkgver}.tar.gz")
-sha256sums=('2dd3bbb5641aff98ae55ee80d2490014ffb5df2873a027b26bf641bae112e1fc')
+sha256sums=('a2e8e4953140b72de2b5b566dfb93448f2bf774a86c510c316508a954f955815')
 
 build() {
     cd "candela_ctrl-${pkgver}"
