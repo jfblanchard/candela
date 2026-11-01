@@ -1,0 +1,57 @@
+# Changelog
+
+All notable changes to Candela are documented here. Commit messages stay
+one line; the details live in this file.
+
+## [0.1.5] — 2026-11-01
+
+### Fixed — stuck dark screen
+
+Fixed a cluster of bugs that could leave the display near-black until a
+forced reboot (gamma ramps persist after a process dies, so any daemon
+holding a dim ramp keeps the screen dark indefinitely):
+
+- **Instant apply** — pass `-r` to the redshift daemon; removes the ~4s
+  fade that made slider changes look like the screen "fading out", and
+  closes the window where killing a daemon mid-fade left the ramp stuck
+  partway to a dark target.
+- **Stray cleanup on quit/close** — competing/orphaned daemons are now
+  killed on every apply *and* on quit/close, not just on apply, so a
+  survivor can't re-assert a stale ramp right after our reset.
+- **Wrapper processes killed** — `redshift-gtk`/`gammastep-indicator`
+  respawn their `redshift` backend child when it dies; `pkill -x redshift`
+  alone lost that fight seconds later. Wrappers are now killed too.
+- **5s watchdog** — detects competing daemons that (re)appear after the
+  last cleanup (autostarted apps finishing boot, manual launches) and
+  re-asserts Candela's settings.
+- **Single instance** — `QLockFile` prevents a second Candela from
+  spawning a second daemon; two daemons re-asserting different ramps is
+  a permanent visible fight.
+- **Config clamping** — loaded settings are clamped to the slider ranges
+  so a corrupt/out-of-range saved value can't apply verbatim at startup.
+- **Brightness floor 10% → 20%** — software gamma at ~10% is effectively
+  a black screen; dangerous to land on accidentally.
+
+### Added
+
+- Warning banner when a competing gamma tool is detected: KDE Night
+  Color enabled, or a redshift/gammastep/clight autostart entry
+  (user-disabled entries are skipped).
+- Tray **"Reset Display"** action — snaps the screen to neutral
+  6500K/100% without opening the window; escape hatch for when the
+  screen is too dim to see.
+- `pkill`/`pgrep` calls tolerate systems without procps installed.
+
+### Changed
+
+- README conflict section rewritten: competing tools are suppressed
+  automatically while Candela runs; disabling their autostart remains
+  the recommended permanent fix.
+
+## [0.1.4] — 2026-10
+
+- Persistent redshift daemon replaces one-shot apply so settings survive
+  DPMS sleep and screen lock.
+- Kill orphaned redshift daemons left by abnormally-killed instances.
+- KDE Night Color conflict detection + warning.
+- Settings persist across launches; system tray; AUR packaging prep.
