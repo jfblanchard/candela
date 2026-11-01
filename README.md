@@ -12,7 +12,7 @@ Most Linux tools in this space are either time-based and automatic (Redshift, Ga
 
 ## Features
 
-- **Brightness slider** — 10% to 100%
+- **Brightness slider** — 20% to 100% (software gamma below ~20% is effectively a black screen)
 - **Color temperature slider** — 2000K (warm candlelight) to 6500K (daylight)
 - **Multi-monitor support** — dropdown auto-populated from connected outputs
 - **Instant apply** — changes take effect as you move the slider
@@ -41,14 +41,29 @@ When redshift is available, Candela keeps a long-lived `redshift` process runnin
 
 > **Note:** X11 only. Wayland is not currently supported.
 
-> **Known conflict:** Do not run Candela at the same time as another tool that adjusts
-> brightness/color temperature — KDE Plasma's **Night Color**, `redshift-gtk` (or any
-> redshift-based autostart), `clight`, etc. They all write to the **same display gamma
-> ramp**, so they fight: whichever one fires last clobbers the others, and your manual
-> setting can silently lose to the other tool's automatic day/night schedule. Pick **one**
-> gamma tool and turn the others off (e.g. System Settings → Night Color → off). If you
-> prefer *automatic* day/night warmth, use KDE Night Color (or redshift-gtk) instead of
-> Candela — it's built for that; Candela is for manual, fixed control.
+> **Other gamma tools:** Anything else that adjusts brightness/color temperature —
+> KDE Plasma's **Night Color**, `redshift-gtk`, `gammastep`, `clight`, etc. — writes
+> to the **same display gamma ramp** Candela uses. If two tools run at once they
+> fight: the screen flickers or drifts between two settings, and a competing daemon
+> can hold the display at a stale dim value.
+>
+> Candela defends itself automatically: on every apply (and on a 5-second watchdog)
+> it stops competing `redshift`/`gammastep` daemons *and* their wrappers — wrappers
+> like `redshift-gtk` respawn their backend when killed, so Candela stops the
+> wrapper too. A warning banner appears if a competing autostart entry is found.
+>
+> For a permanent fix, still disable the other tool's autostart — on KDE:
+> System Settings → Autostart, or:
+> ```bash
+> kwriteconfig5 --file kwinrc --group NightColor --key Active false
+> qdbus org.kde.KWin /KWin reconfigure
+> ```
+> If you prefer *automatic* day/night warmth, use KDE Night Color (or redshift-gtk)
+> instead of Candela — it's built for that; Candela is for manual, fixed control.
+>
+> **Escape hatch:** if the screen ever ends up too dim to see, right-click the
+> Candela tray icon → **Reset Display** to snap back to neutral without opening
+> the window.
 
 ## Install
 

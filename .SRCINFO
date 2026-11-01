@@ -1,0 +1,20 @@
+pkgbase = candela
+	pkgdesc = Manual brightness and color temperature control for Linux
+	pkgver = 0.1.4
+	pkgrel = 1
+	url = https://github.com/jfblanchard/candela
+	arch = any
+	license = MIT
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-wheel
+	makedepends = python-setuptools
+	depends = python
+	depends = python-pyqt6
+	depends = redshift
+	depends = xorg-xrandr
+	depends = procps-ng
+	source = https://files.pythonhosted.org/packages/source/c/candela-ctrl/candela_ctrl-0.1.4.tar.gz
+	sha256sums = 2dd3bbb5641aff98ae55ee80d2490014ffb5df2873a027b26bf641bae112e1fc
+
+pkgname = candela

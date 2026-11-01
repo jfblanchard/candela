@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu
 )
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QLockFile
 
 
 STYLESHEET = """
@@ -75,6 +75,7 @@ QLabel#value { color: #a6e3a1; font-weight: bold; min-width: 62px; }
 QCheckBox { color: #6c7086; font-size: 11px; }
 QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #585b70; border-radius: 3px; background: #313244; }
 QCheckBox::indicator:checked { background: #89b4fa; border-color: #89b4fa; }
+QLabel#warn { color: #f9e2af; background: #3d2e1e; border: 1px solid #f9e2af; border-radius: 4px; padding: 6px 8px; }
 """
 
 
@@ -102,6 +103,113 @@ def check_redshift():
         return False
 
 
+def check_kde_night_color():
+    """Return True if KDE Night Color is enabled (reads ~/.config/kwinrc).
+
+    Night Color writes to the same X11 gamma ramp as Candela's redshift
+    daemon; running both causes visible warm/cold flicker around
+    sunrise/sunset when Night Color transitions between day and night
+    temperatures."""
+    try:
+        text = (Path.home() / ".config" / "kwinrc").read_text()
+        section = text.split("[NightColor]", 1)
+        if len(section) < 2:
+            return False
+        for line in section[1].splitlines():
+            if line.startswith("[") and not line.startswith("[NightColor]"):
+                break
+            if line.strip().lower() == "active=true":
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def check_competing_autostart():
+    """Return the name of an autostart entry that launches a competing
+    gamma daemon (redshift-gtk, gammastep, clight...), or None.
+
+    A competing daemon re-asserts its own gamma ramp every few seconds and
+    fights Candela's daemon — the visible symptom is the screen
+    alternating/flickering between two brightness/temperature settings.
+    Candela stops competitors while it runs, but autostart relaunches
+    them at every login, so the user should still disable the entry."""
+    autostart = Path.home() / ".config" / "autostart"
+    try:
+        for entry in autostart.glob("*.desktop"):
+            try:
+                text = entry.read_text(errors="replace").lower()
+            except OSError:
+                continue
+            # Hidden=true / X-GNOME-Autostart-enabled=false mark a
+            # user-disabled entry — it launches nothing, don't warn on it.
+            if "hidden=true" in text or "autostart-enabled=false" in text:
+                continue
+            if any(t in text for t in ("redshift", "gammastep", "clight")):
+                return entry.name
+    except OSError:
+        pass
+    return None
+
+
+# Competing gamma tools: every process here writes the same X11 gamma ramp
+# Candela does. "-x" entries match the exact process name; "-f" entries are
+# wrapper scripts matched by command line — wrappers (e.g. redshift-gtk)
+# respawn their backend daemon when it dies, so killing only the `redshift`
+# child lets the fight resume seconds later. The wrapper itself must go.
+COMPETING_GAMMA_TOOLS = [
+    ("-x", "redshift"),
+    ("-x", "gammastep"),
+    ("-f", "redshift-gtk"),
+    ("-f", "gammastep-indicator"),
+]
+
+
+def _pkill(mode, name):
+    try:
+        subprocess.run(
+            ["pkill", "-9", mode, name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        pass  # no procps on this system — best effort only
+
+
+def _pgrep(mode, name):
+    try:
+        r = subprocess.run(
+            ["pgrep", mode, name], capture_output=True, text=True, timeout=3
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    return [int(p) for p in r.stdout.split()]
+
+
+def kill_competing_gamma_daemons():
+    """SIGKILL every competing gamma process, including strays not
+    tracked here.
+
+    Strays come from Candela instances that died abnormally or from other
+    tools (e.g. redshift-gtk). Each one keeps re-applying its own gamma
+    ramp every few seconds — that includes resurrecting an old dim
+    setting *after* we've reset the screen, which is how the display can
+    end up stuck near-black until reboot."""
+    for mode, name in COMPETING_GAMMA_TOOLS:
+        _pkill(mode, name)
+
+
+def stray_gamma_daemon_pids(exclude=None):
+    """PIDs of competing gamma processes currently alive, excluding our
+    own daemon's PID. Used by the watchdog to detect tools that (re)start
+    after our last pkill — e.g. an autostarted redshift-gtk finishing its
+    boot, or a wrapper respawning its backend."""
+    pids = []
+    for mode, name in COMPETING_GAMMA_TOOLS:
+        pids += _pgrep(mode, name)
+    return [p for p in pids if p != exclude]
+
+
 # Fixed reference location used only to keep redshift's day/night solar
 # calculation from mattering: day and night temp/brightness are always set
 # to the same value, so the "location" itself never affects the output.
@@ -111,12 +219,28 @@ REDSHIFT_MANUAL_LOCATION = "0:0"
 CONFIG_PATH = Path.home() / ".config" / "candela" / "settings.json"
 DEFAULTS = {"brightness": 100, "temp_k": 6500, "keep_on_close": False}
 
+# Software gamma dimming is extremely aggressive — ~10% reads as a black
+# screen, which is dangerous to land on accidentally. 20% is still very
+# dark but leaves the UI findable.
+BRIGHTNESS_MIN, BRIGHTNESS_MAX = 20, 100
+TEMP_MIN, TEMP_MAX = 2000, 6500
+
 
 def load_config():
     try:
-        return {**DEFAULTS, **json.loads(CONFIG_PATH.read_text())}
+        cfg = {**DEFAULTS, **json.loads(CONFIG_PATH.read_text())}
     except Exception:
         return dict(DEFAULTS)
+    # Clamp to slider ranges: an out-of-range saved value is applied
+    # verbatim at startup, so a corrupt/very low brightness would read
+    # as a black screen before the user even touches a slider.
+    try:
+        cfg["brightness"] = min(
+            max(int(cfg["brightness"]), BRIGHTNESS_MIN), BRIGHTNESS_MAX)
+        cfg["temp_k"] = min(max(int(cfg["temp_k"]), TEMP_MIN), TEMP_MAX)
+    except (TypeError, ValueError):
+        return dict(DEFAULTS)
+    return cfg
 
 
 def save_config(brightness, temp_k, keep_on_close):
@@ -148,6 +272,14 @@ class MonitorControl(QWidget):
         self.restore_config()
         self.setup_tray()
 
+        # Watchdog: competing tools can (re)appear *after* our last pkill —
+        # autostarted apps finishing their boot, redshift-gtk respawning its
+        # backend, a user launching one by hand. Re-check periodically and
+        # re-assert, so the gamma ramp can never be held hostage for long.
+        self.watchdog_timer = QTimer()
+        self.watchdog_timer.timeout.connect(self.check_for_strays)
+        self.watchdog_timer.start(5000)
+
         if not self.has_redshift:
             self.temp_group.setTitle("Color Temperature  ⚠ (install redshift)")
             self.temp_slider.setEnabled(False)
@@ -161,6 +293,28 @@ class MonitorControl(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(10)
         root.setContentsMargins(18, 18, 18, 18)
+
+        warnings = []
+        if check_kde_night_color():
+            warnings.append(
+                "KDE Night Color is enabled — it fights Candela over the "
+                "gamma ramp (warm/cold flicker). Turn it off in System "
+                "Settings → Night Color."
+            )
+        rs_autostart = check_competing_autostart()
+        if rs_autostart:
+            warnings.append(
+                f"'{rs_autostart}' launches a competing gamma tool at "
+                "login — it re-applies its own brightness/temperature and "
+                "fights Candela's settings. Candela stops it automatically "
+                "while running; disable it in System Settings → Autostart "
+                "for a permanent fix."
+            )
+        if warnings:
+            warn = QLabel("⚠ " + "\n\n".join(warnings))
+            warn.setObjectName("warn")
+            warn.setWordWrap(True)
+            root.addWidget(warn)
 
         # --- Monitor selector ---
         if len(self.monitors) > 1:
@@ -182,7 +336,7 @@ class MonitorControl(QWidget):
 
         bright_row = QHBoxLayout()
         self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
-        self.brightness_slider.setRange(10, 100)
+        self.brightness_slider.setRange(BRIGHTNESS_MIN, BRIGHTNESS_MAX)
         self.brightness_slider.setValue(100)
         self.brightness_slider.valueChanged.connect(self.on_brightness_changed)
 
@@ -214,7 +368,7 @@ class MonitorControl(QWidget):
 
         temp_row = QHBoxLayout()
         self.temp_slider = QSlider(Qt.Orientation.Horizontal)
-        self.temp_slider.setRange(2000, 6500)
+        self.temp_slider.setRange(TEMP_MIN, TEMP_MAX)
         self.temp_slider.setValue(6500)
         self.temp_slider.valueChanged.connect(self.on_temp_changed)
 
@@ -299,6 +453,16 @@ class MonitorControl(QWidget):
         one-shot -O apply), so it re-asserts the gamma ramp on its own
         after DPMS sleep/wake, screen lock, or other events that reset it."""
         self.stop_redshift_daemon()
+        # Kill any orphaned redshift daemons left by a previous instance that
+        # was killed externally (e.g. SIGKILL) — they keep re-applying their
+        # gamma ramp and fight ours, causing visible brightness flicker.
+        kill_competing_gamma_daemons()
+        # -r disables redshift's ~4s ease-in fade so slider changes apply
+        # instantly; it also removes the window where a daemon killed by
+        # the next slider change leaves the ramp stuck mid-fade.
+        # No -P either: -P resets the gamma ramp to neutral before
+        # applying, which would flash the screen to full brightness on
+        # every slider change.
         self.redshift_proc = subprocess.Popen(
             [
                 "redshift",
@@ -306,7 +470,7 @@ class MonitorControl(QWidget):
                 "-t", f"{temp_k}:{temp_k}",
                 "-b", f"{brightness:.2f}:{brightness:.2f}",
                 "-m", "randr",
-                "-P",
+                "-r",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -317,9 +481,9 @@ class MonitorControl(QWidget):
         a graceful SIGTERM: redshift can take several seconds to react to
         SIGTERM (it appears to only check for signals once it reaches its
         main loop), which would block the UI on every slider change. A hard
-        kill is safe here because whatever replaces it (a new daemon or an
-        explicit one-shot reset) always passes -P to reset the gamma ramp
-        before applying its own values."""
+        kill is safe here because the gamma ramp persists after the daemon
+        dies, so whatever replaces it (a new daemon or an explicit one-shot
+        reset) takes over from a valid ramp rather than a blank screen."""
         if self.redshift_proc is not None and self.redshift_proc.poll() is None:
             self.redshift_proc.kill()
             self.redshift_proc.wait()
@@ -348,6 +512,9 @@ class MonitorControl(QWidget):
         show_action = menu.addAction("Show Candela")
         show_action.triggered.connect(self.show_window)
         menu.addSeparator()
+        reset_action = menu.addAction("Reset Display")
+        reset_action.triggered.connect(self.reset_display_now)
+        menu.addSeparator()
         quit_action = menu.addAction("Quit")
         quit_action.triggered.connect(self.quit_app)
 
@@ -360,6 +527,31 @@ class MonitorControl(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def reset_display_now(self):
+        """Tray escape hatch: snap the display back to neutral without
+        opening the window — for when the screen is too dim/warm to find
+        the window at all."""
+        self.brightness_slider.setValue(BRIGHTNESS_MAX)
+        self.temp_slider.setValue(TEMP_MAX)
+        self.apply_settings()
+
+    def check_for_strays(self):
+        """Watchdog tick. If a competing daemon (re)appeared since the last
+        pkill, wipe everything and respawn ours. pkill can't exclude our
+        own redshift by name, so ours dies too and is immediately replaced
+        — harmless now that applies are instant (-r)."""
+        own_alive = (self.redshift_proc is not None
+                     and self.redshift_proc.poll() is None)
+        own = self.redshift_proc.pid if own_alive else None
+        if not stray_gamma_daemon_pids(exclude=own):
+            return
+        if self.has_redshift:
+            self.start_redshift_daemon(
+                round(self.temp_slider.value() / 100) * 100,
+                self.brightness_slider.value() / 100.0)
+        else:
+            kill_competing_gamma_daemons()
+
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.isVisible():
@@ -370,6 +562,10 @@ class MonitorControl(QWidget):
     def quit_app(self):
         self._quitting = True
         self.stop_redshift_daemon()
+        # Kill strays BEFORE resetting: a surviving daemon would re-assert
+        # its old ramp right after our reset, leaving the screen at its
+        # stale setting instead of defaults.
+        kill_competing_gamma_daemons()
         if not self.keep_checkbox.isChecked():
             if self.has_redshift:
                 subprocess.run(
@@ -398,6 +594,9 @@ class MonitorControl(QWidget):
             return
 
         self.stop_redshift_daemon()
+        # Kill strays before resetting, same as quit_app — otherwise a
+        # stray daemon resurrects its stale ramp after our reset.
+        kill_competing_gamma_daemons()
         if not self.keep_checkbox.isChecked():
             # Bypass the debounce timer — call subprocess.run (blocking)
             # directly so the reset completes before the process exits.
@@ -418,6 +617,18 @@ class MonitorControl(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+
+    # Single instance: a second Candela would spawn a second redshift
+    # daemon, and the two daemons re-assert their own ramps every few
+    # seconds — a permanent visible fight until reboot. QLockFile records
+    # the holder's PID and auto-recovers locks left by killed processes.
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(CONFIG_PATH.with_name("instance.lock")))
+    if not lock.tryLock(100):
+        print("Candela is already running (check the system tray icon).",
+              file=sys.stderr)
+        sys.exit(1)
+
     window = MonitorControl()
     window.show()
     sys.exit(app.exec())
